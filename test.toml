@@ -1,0 +1,10 @@
+
+[settings]
+default_projects_path "~/projects"
+
+[targets]
+
+[targets.rust-hx]
+ide = hx
+file_name_regex = Cargo.toml
+
