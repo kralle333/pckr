@@ -23,11 +23,12 @@ fn main() {
         }
         None => {
             let for_selector = config.targets.iter().map(|x| x.name.clone()).collect();
-            let ans: String = Select::new("Select Rust Project", for_selector)
+            let ans: String = Select::new("Select Target", for_selector)
                 .with_page_size(20)
                 .prompt()
                 .unwrap();
             let target_config = config.targets.iter().find(|c| c.name == ans).unwrap();
+
             let project_path = target_config
                 .project_path
                 .as_ref()
