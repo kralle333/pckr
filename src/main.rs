@@ -11,7 +11,7 @@ fn main() {
     let selected_target_config = args().nth(1);
 
     let selected_target_config =
-        selected_target_config.and_then(|x| config.targets.iter().find(|c| c.name == x));
+        selected_target_config.and_then(|x| config.targets.iter().find(|c| c.id == x));
     match selected_target_config {
         Some(target_config) => {
             let project_path = target_config

@@ -19,6 +19,7 @@ pub struct Config {
 #[derive(Deserialize, Serialize, Debug, Default)]
 pub struct TargetConfig {
     pub name: String,
+    pub id: String,
     pub project_path: Option<String>,
     pub file_name_regex: String,
     pub editor: String,
@@ -149,6 +150,17 @@ pub fn get_config() -> Config {
 
                 println!("Found {} projects", projects_with_this_config.len());
 
+                let name = ans.to_string();
+
+                let id = name
+                    .to_lowercase()
+                    .split_whitespace()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<String>>()
+                    .join(".");
+
+                println!("Added target with id {id}");
+
                 targets.push(TargetConfig {
                     name: ans.to_string(),
                     project_path: path,
@@ -156,6 +168,7 @@ pub fn get_config() -> Config {
                     editor,
                     recursive,
                     open_in,
+                    id,
                 });
                 let add_new = inquire::Confirm::new("Add another?").prompt().unwrap();
                 if !add_new {
