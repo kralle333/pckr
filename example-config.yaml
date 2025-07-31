@@ -1,0 +1,27 @@
+globals:
+  editor: hx
+  projects_root: /Users/hellothere/projects
+
+targets:
+  - name: Personal Rust projects
+    id: personal.rust.projects
+    select_option_regex: "([^/]+)$"
+    list_cmd: >
+      fd --type f . {{globals.projects_root}}/personal |
+      grep -E '/[^/]*Cargo.toml[^/]*$' |
+      awk -F/ 'NF{NF--; print "/"$0}' OFS=/ |
+      sort -u
+    run_cmd: "{{globals.editor}} {{arg}}"
+  - name: Zellij Sessions
+    id: zellij.sessions
+    list_cmd: zellij list-sessions -ns
+    run_cmd: "zellij attach \"{{arg}}\""
+    
+  - name: Docker logs
+    id: docker.logs
+    select_option_regex: "(.+) "
+    select_arg_regex: " (.+)"
+    list_cmd: docker ps -a --format "{{.Names}} {{.ID}}"
+    run_cmd: "docker logs {{arg}}"
+      
+
