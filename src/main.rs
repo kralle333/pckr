@@ -1,9 +1,30 @@
-use config::get_config;
+use config::{Config, TargetConfig, get_config};
 use inquire::Select;
-use std::env::args;
+use regex::Regex;
+use std::{collections::HashMap, env::args, process::Command};
 
 mod config;
 mod selection;
+
+fn build_consts(config: &Config, target_config: &TargetConfig) -> HashMap<String, String> {
+    let mut consts = HashMap::new();
+
+    for (name, arg) in config.globals.clone().unwrap_or_default() {
+        consts.insert(format!("globals.{name}"), arg);
+    }
+    for (name, arg) in target_config.consts.clone().unwrap_or_default() {
+        consts.insert(name, arg);
+    }
+    consts
+}
+
+fn replace_consts(string: &str, consts: &HashMap<String, String>) -> String {
+    let mut cmd = string.to_string();
+    for (key, value) in consts {
+        cmd = cmd.replace(format!("{{{{{key}}}}}").as_str(), value);
+    }
+    cmd
+}
 
 fn main() {
     let config = get_config();
@@ -12,31 +33,127 @@ fn main() {
 
     let selected_target_config =
         selected_target_config.and_then(|x| config.targets.iter().find(|c| c.id == x));
-    match selected_target_config {
-        Some(target_config) => {
-            let project_path = target_config
-                .project_path
-                .as_ref()
-                .unwrap_or(&config.default_project_path);
-
-            selection::show_target_selection(target_config, project_path);
-        }
+    let target_config = match selected_target_config {
+        Some(target_config) => target_config,
         None => {
             let for_selector = config.targets.iter().map(|x| x.name.clone()).collect();
             let ans: String = Select::new("Select Target", for_selector)
                 .with_page_size(20)
                 .prompt()
                 .unwrap();
-            let target_config = config.targets.iter().find(|c| c.name == ans).unwrap();
-
-            let project_path = target_config
-                .project_path
-                .as_ref()
-                .unwrap_or(&config.default_project_path);
-
-            selection::show_target_selection(target_config, project_path);
+            config.targets.iter().find(|c| c.name == ans).unwrap()
         }
-    }
-    // if no target show selector
+    };
+
+    let consts = build_consts(&config, target_config);
+
+    let list_cmd = replace_consts(&target_config.list_cmd, &consts);
+    let result = Command::new("sh")
+        .arg("-c")
+        .arg(&list_cmd)
+        .output()
+        .expect("failed to get list output");
+
+    let list_text = String::from_utf8(result.stdout).unwrap();
+    let input = create_selection_input(target_config, &list_text);
+
+    show_options(input, consts); // if no target show selector
     // if target, find target config and load the specified target in editor
+}
+
+pub struct SelectionInput {
+    pub options: Vec<String>,
+    pub args: Vec<String>,
+    pub run_cmd: String,
+}
+
+fn create_selection_input(target_config: &TargetConfig, list_text: &str) -> SelectionInput {
+    // Regex parsing
+    let name_regex = target_config
+        .select_option_regex
+        .clone()
+        .unwrap_or(".*".to_string());
+    let name_regex = Regex::new(&name_regex).unwrap();
+
+    let arg_regex = target_config
+        .select_arg_regex
+        .clone()
+        .unwrap_or(".*".to_string());
+    let arg_regex = Regex::new(&arg_regex).unwrap();
+
+    // Build options and args from list command
+    let input: (Vec<String>, Vec<String>) = list_text
+        .lines()
+        .map(|x| {
+            let name: String = name_regex
+                .find_iter(x)
+                .map(|x| x.as_str().to_string())
+                .collect::<Vec<String>>()
+                .join(" ");
+
+            let arg: Vec<String> = arg_regex
+                .find_iter(x)
+                .map(|x| x.as_str().to_string())
+                .collect();
+
+            match arg {
+                _ if arg.is_empty() => {
+                    panic!("unable to extract arg from {x}");
+                }
+                _ if arg.len() > 1 => {
+                    panic!(
+                        "unable to handle multiple args per option (found {}): {:?}",
+                        arg.len(),
+                        arg
+                    );
+                }
+                _ => (name, arg.first().unwrap().to_string()),
+            }
+        })
+        .fold(HashMap::new(), |mut acc, (name, arg)| {
+            acc.insert(name, arg);
+            acc
+        })
+        .iter()
+        .fold((vec![], vec![]), |(names, args), (name, arg)| {
+            (
+                [names, vec![name.to_string()]].concat(),
+                [args, vec![arg.to_string()]].concat(),
+            )
+        });
+
+    SelectionInput {
+        options: input.0,
+        args: input.1,
+        run_cmd: target_config.run_cmd.to_string(),
+    }
+}
+
+pub fn show_options(input: SelectionInput, mut consts: HashMap<String, String>) {
+    let ans: String = Select::new("Select Option", input.options.clone())
+        .with_page_size(20)
+        .prompt()
+        .unwrap();
+
+    let selected_arg = input
+        .args
+        .iter()
+        .zip(input.options)
+        .find(|(_, name)| *name == ans);
+    let (arg, _) = selected_arg.unwrap();
+
+    consts.insert("arg".to_string(), arg.to_string());
+
+    let run_cmd = replace_consts(&input.run_cmd, &consts);
+
+    println!("run cmd: {run_cmd}");
+
+    // return;
+    let status = Command::new("sh").arg("-c").arg(run_cmd).status();
+
+    match status {
+        Ok(status) if status.success() => {}
+        Ok(status) => eprintln!("IDE exited with non-zero code: {status}"),
+        Err(err) => eprintln!("Failed to launch IDE: {err}"),
+    }
 }
