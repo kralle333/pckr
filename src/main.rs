@@ -4,7 +4,6 @@ use regex::Regex;
 use std::{collections::HashMap, env::args, process::Command};
 
 mod config;
-mod selection;
 
 fn build_consts(config: &Config, target_config: &TargetConfig) -> HashMap<String, String> {
     let mut consts = HashMap::new();
@@ -65,6 +64,7 @@ pub struct SelectionInput {
     pub options: Vec<String>,
     pub args: Vec<String>,
     pub run_cmd: String,
+    pub cwd: Option<String>,
 }
 
 fn create_selection_input(target_config: &TargetConfig, list_text: &str) -> SelectionInput {
@@ -92,8 +92,8 @@ fn create_selection_input(target_config: &TargetConfig, list_text: &str) -> Sele
                 .join(" ");
 
             let arg: Vec<String> = arg_regex
-                .find_iter(x)
-                .map(|x| x.as_str().to_string())
+                .captures_iter(x)
+                .map(|x| x.get(1).unwrap().as_str().to_string())
                 .collect();
 
             match arg {
@@ -126,6 +126,7 @@ fn create_selection_input(target_config: &TargetConfig, list_text: &str) -> Sele
         options: input.0,
         args: input.1,
         run_cmd: target_config.run_cmd.to_string(),
+        cwd: target_config.cwd.clone(),
     }
 }
 
@@ -148,12 +149,18 @@ pub fn show_options(input: SelectionInput, mut consts: HashMap<String, String>) 
 
     println!("run cmd: {run_cmd}");
 
-    // return;
-    let status = Command::new("sh").arg("-c").arg(run_cmd).status();
+    let mut command = Command::new("sh");
 
+    if let Some(path) = input.cwd {
+        let cwd = replace_consts(&path, &consts);
+        println!("cwd: {cwd}");
+        command.current_dir(cwd);
+    }
+
+    let status = command.arg("-c").arg(&run_cmd).status();
     match status {
         Ok(status) if status.success() => {}
-        Ok(status) => eprintln!("IDE exited with non-zero code: {status}"),
-        Err(err) => eprintln!("Failed to launch IDE: {err}"),
+        Ok(status) => eprintln!("Command exited with non-zero code: {status}"),
+        Err(err) => eprintln!("Failed to run command: {err}"),
     }
 }

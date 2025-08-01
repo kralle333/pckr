@@ -21,6 +21,7 @@ pub struct TargetConfig {
     pub select_option_regex: Option<String>,
     pub select_arg_regex: Option<String>,
     pub run_cmd: String,
+    pub cwd: Option<String>,
     pub consts: Option<HashMap<String, String>>,
 }
 
