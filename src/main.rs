@@ -86,10 +86,9 @@ fn create_selection_input(target_config: &TargetConfig, list_text: &str) -> Sele
         .lines()
         .map(|x| {
             let name: String = name_regex
-                .find_iter(x)
-                .map(|x| x.as_str().to_string())
-                .collect::<Vec<String>>()
-                .join(" ");
+                .captures_iter(x)
+                .map(|x| x.get(1).unwrap().as_str().to_string())
+                .collect();
 
             let arg: Vec<String> = arg_regex
                 .captures_iter(x)
