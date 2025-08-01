@@ -72,13 +72,13 @@ fn create_selection_input(target_config: &TargetConfig, list_text: &str) -> Sele
     let name_regex = target_config
         .select_option_regex
         .clone()
-        .unwrap_or(".*".to_string());
+        .unwrap_or("(.*)".to_string());
     let name_regex = Regex::new(&name_regex).unwrap();
 
     let arg_regex = target_config
         .select_arg_regex
         .clone()
-        .unwrap_or(".*".to_string());
+        .unwrap_or("(.*)".to_string());
     let arg_regex = Regex::new(&arg_regex).unwrap();
 
     // Build options and args from list command
