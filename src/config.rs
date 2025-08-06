@@ -7,15 +7,17 @@ use std::{
     process::exit,
 };
 
-#[derive(Deserialize, Serialize)]
-pub struct Config {
+#[derive(Deserialize, Serialize, Debug, Default, Clone)]
+pub struct CollectionConfig {
+    pub id: String,
+    pub consts: Option<HashMap<String, String>>,
     pub targets: Vec<TargetConfig>,
-    pub globals: Option<HashMap<String, String>>,
+    pub collections: Option<Vec<CollectionConfig>>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Default)]
+#[derive(Deserialize, Serialize, Debug, Default, Clone)]
 pub struct TargetConfig {
-    pub name: String,
+    pub name: Option<String>,
     pub id: String,
     pub list_cmd: String,
     pub select_option_regex: Option<String>,
@@ -32,7 +34,7 @@ fn get_path() -> Result<PathBuf, anyhow::Error> {
         .join("config.yaml"))
 }
 
-fn save_config(config: &Config) -> Result<(), anyhow::Error> {
+fn save_config(config: &CollectionConfig) -> Result<(), anyhow::Error> {
     let config_path = get_path()?;
     fs::create_dir_all(config_path.parent().unwrap()).unwrap();
 
@@ -41,7 +43,7 @@ fn save_config(config: &Config) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-pub fn load_config() -> Result<Option<Config>, anyhow::Error> {
+pub fn load_config() -> Result<Option<CollectionConfig>, anyhow::Error> {
     let config_path = get_path()?;
 
     if let Ok(false) = fs::exists(&config_path) {
@@ -49,11 +51,17 @@ pub fn load_config() -> Result<Option<Config>, anyhow::Error> {
     }
     let content = fs::read_to_string(&config_path)?;
 
-    let config = serde_yaml::from_str(&content)?;
+    let config = match serde_yaml::from_str(&content) {
+        Ok(config) => config,
+        Err(e) => {
+            println!("{e:?}");
+            return Err(anyhow!("Failed to deserialize config {}", e));
+        }
+    };
     Ok(config)
 }
 
-pub fn get_config() -> Config {
+pub fn get_config() -> CollectionConfig {
     match load_config() {
         Ok(Some(config)) => config,
         Ok(None) => {
@@ -67,30 +75,13 @@ pub fn get_config() -> Config {
                 Ok(false) => exit(0),
                 Err(_) => {}
             };
-            // if config missing ask to create config interactively
-            // false => exit
-            // default project path
-
-            let home_dir = dirs::home_dir().unwrap();
-            let default_path = loop {
-                let default_path = inquire::Text::new("Path to where to search for projects")
-                    .with_default(home_dir.to_str().unwrap())
-                    .prompt()
-                    .unwrap();
-
-                let path = shellexpand::full(&default_path).unwrap().to_string();
-                if !fs::exists(&path).unwrap() {
-                    println!("Invalid path entered");
-                    continue;
-                } else {
-                    break path;
-                }
-            };
 
             // TODO: add template system
-            let new_config = Config {
+            let new_config = CollectionConfig {
+                collections: None,
+                id: "root".to_string(),
+                consts: Some(HashMap::new()),
                 targets: vec![],
-                globals: Some(HashMap::new()),
             };
 
             save_config(&new_config).unwrap();

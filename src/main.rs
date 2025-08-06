@@ -1,20 +1,66 @@
-use config::{Config, TargetConfig, get_config};
+use config::{CollectionConfig, TargetConfig, get_config};
 use inquire::Select;
 use regex::Regex;
 use std::{collections::HashMap, env::args, process::Command};
 
 mod config;
 
-fn build_consts(config: &Config, target_config: &TargetConfig) -> HashMap<String, String> {
+fn build_consts(
+    config: &CollectionConfig,
+    target_config: &TargetConfig,
+) -> HashMap<String, String> {
     let mut consts = HashMap::new();
 
-    for (name, arg) in config.globals.clone().unwrap_or_default() {
-        consts.insert(format!("globals.{name}"), arg);
+    for (name, arg) in config.consts.clone().unwrap_or_default() {
+        consts.insert(name.to_string(), arg);
     }
     for (name, arg) in target_config.consts.clone().unwrap_or_default() {
         consts.insert(name, arg);
     }
     consts
+}
+
+fn get_collection_and_target(
+    collection: &CollectionConfig,
+    arg: &str,
+) -> (CollectionConfig, TargetConfig) {
+    let path: Vec<String> = arg.split("/").map(|x| x.to_string()).collect();
+    if path.is_empty() {
+        panic!("invalid arg");
+    } else if path.len() == 1 {
+        println!("Path is {path:?}");
+        println!(
+            "{:?}",
+            collection
+                .targets
+                .iter()
+                .map(|x| x.id.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+        let target_config = collection
+            .targets
+            .iter()
+            .find(|x| x.id == *path.first().unwrap())
+            .cloned()
+            .unwrap();
+        println!("found target: {target_config:?}");
+        (collection.clone(), target_config)
+    } else {
+        let this_collection_id = path.first().unwrap();
+        if collection.collections.is_none() {
+            panic!("expected collection with id {this_collection_id}, but found none!");
+        }
+        let child = collection
+            .collections
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|x| x.id == *this_collection_id)
+            .unwrap();
+        println!("Next {}", path.as_slice()[1..].join("/"));
+        get_collection_and_target(child, &path.as_slice()[1..].join("/"))
+    }
 }
 
 fn replace_consts(string: &str, consts: &HashMap<String, String>) -> String {
@@ -25,28 +71,64 @@ fn replace_consts(string: &str, consts: &HashMap<String, String>) -> String {
     cmd
 }
 
+fn create_all_options(collection: &CollectionConfig, path: &str) -> Vec<String> {
+    let prepend = if path.is_empty() {
+        "".to_string()
+    } else {
+        format!("{path}/")
+    };
+    let mut target_paths: Vec<_> = collection
+        .targets
+        .iter()
+        .map(|x| format!("{prepend}{}", x.id))
+        .collect();
+
+    if let Some(collections) = &collection.collections {
+        for c in collections {
+            target_paths.push(format!("{}/", c.id));
+        }
+    }
+    target_paths
+}
+
 fn main() {
-    let config = get_config();
+    let root_collection_config = get_config();
 
-    let selected_target_config = args().nth(1);
+    let target_config_arg = args().nth(1);
 
-    let selected_target_config =
-        selected_target_config.and_then(|x| config.targets.iter().find(|c| c.id == x));
-    let target_config = match selected_target_config {
-        Some(target_config) => target_config,
+    let (collection_config, target_config) = match target_config_arg {
+        Some(target_config) => get_collection_and_target(&root_collection_config, &target_config),
         None => {
-            let for_selector = config.targets.iter().map(|x| x.name.clone()).collect();
-            let ans: String = Select::new("Select Target", for_selector)
-                .with_page_size(20)
-                .prompt()
-                .unwrap();
-            config.targets.iter().find(|c| c.name == ans).unwrap()
+            let mut found_config = root_collection_config.clone();
+            let ans = loop {
+                let options = create_all_options(&found_config, "");
+                let ans = Select::new("Select", options).prompt().unwrap();
+                println!("Anser {ans}");
+                if ans.ends_with("/") {
+                    // println!(
+                    //     "looking for collection {ans}, in {:?}",
+                    //     found_config.collections.as_ref().unwrap()
+                    // );
+
+                    found_config = found_config
+                        .collections
+                        .unwrap()
+                        .iter()
+                        .find(|x| x.id == ans[0..ans.len() - 1])
+                        .unwrap()
+                        .clone();
+                } else {
+                    break ans;
+                }
+            };
+            get_collection_and_target(&found_config, &ans)
         }
     };
 
-    let consts = build_consts(&config, target_config);
+    let consts = build_consts(&collection_config, &target_config);
 
     let list_cmd = replace_consts(&target_config.list_cmd, &consts);
+    println!("list cmd is {list_cmd}");
     let result = Command::new("sh")
         .arg("-c")
         .arg(&list_cmd)
@@ -54,12 +136,13 @@ fn main() {
         .expect("failed to get list output");
 
     let list_text = String::from_utf8(result.stdout).unwrap();
-    let input = create_selection_input(target_config, &list_text);
+    let input = create_selection_input(&target_config, &list_text);
 
     show_options(input, consts); // if no target show selector
     // if target, find target config and load the specified target in editor
 }
 
+#[derive(Debug)]
 pub struct SelectionInput {
     pub options: Vec<String>,
     pub args: Vec<String>,
@@ -130,6 +213,8 @@ fn create_selection_input(target_config: &TargetConfig, list_text: &str) -> Sele
 }
 
 pub fn show_options(input: SelectionInput, mut consts: HashMap<String, String>) {
+    println!("input {input:?}");
+
     let ans: String = Select::new("Select Option", input.options.clone())
         .with_page_size(20)
         .prompt()
