@@ -28,8 +28,8 @@ fn get_collection_and_target(
     if path.is_empty() {
         panic!("invalid arg");
     } else if path.len() == 1 {
-        println!("Path is {path:?}");
-        println!(
+        
+        
             "{:?}",
             collection
                 .targets
@@ -44,7 +44,7 @@ fn get_collection_and_target(
             .find(|x| x.id == *path.first().unwrap())
             .cloned()
             .unwrap();
-        println!("found target: {target_config:?}");
+        
         (collection.clone(), target_config)
     } else {
         let this_collection_id = path.first().unwrap();
@@ -58,7 +58,7 @@ fn get_collection_and_target(
             .iter()
             .find(|x| x.id == *this_collection_id)
             .unwrap();
-        println!("Next {}", path.as_slice()[1..].join("/"));
+        
         get_collection_and_target(child, &path.as_slice()[1..].join("/"))
     }
 }
@@ -103,7 +103,7 @@ fn main() {
             let ans = loop {
                 let options = create_all_options(&found_config, "");
                 let ans = Select::new("Select", options).prompt().unwrap();
-                println!("Anser {ans}");
+                
                 if ans.ends_with("/") {
                     // println!(
                     //     "looking for collection {ans}, in {:?}",
@@ -128,7 +128,7 @@ fn main() {
     let consts = build_consts(&collection_config, &target_config);
 
     let list_cmd = replace_consts(&target_config.list_cmd, &consts);
-    println!("list cmd is {list_cmd}");
+    
     let result = Command::new("sh")
         .arg("-c")
         .arg(&list_cmd)
@@ -213,7 +213,7 @@ fn create_selection_input(target_config: &TargetConfig, list_text: &str) -> Sele
 }
 
 pub fn show_options(input: SelectionInput, mut consts: HashMap<String, String>) {
-    println!("input {input:?}");
+    
 
     let ans: String = Select::new("Select Option", input.options.clone())
         .with_page_size(20)
@@ -231,13 +231,13 @@ pub fn show_options(input: SelectionInput, mut consts: HashMap<String, String>) 
 
     let run_cmd = replace_consts(&input.run_cmd, &consts);
 
-    println!("run cmd: {run_cmd}");
+    
 
     let mut command = Command::new("sh");
 
     if let Some(path) = input.cwd {
         let cwd = replace_consts(&path, &consts);
-        println!("cwd: {cwd}");
+        
         command.current_dir(cwd);
     }
 

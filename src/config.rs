@@ -54,7 +54,7 @@ pub fn load_config() -> Result<Option<CollectionConfig>, anyhow::Error> {
     let config = match serde_yaml::from_str(&content) {
         Ok(config) => config,
         Err(e) => {
-            println!("{e:?}");
+            
             return Err(anyhow!("Failed to deserialize config {}", e));
         }
     };
