@@ -20,6 +20,14 @@ fn build_consts(
     consts
 }
 
+fn replace_consts(string: &str, consts: &HashMap<String, String>) -> String {
+    let mut cmd = string.to_string();
+    for (key, value) in consts {
+        cmd = cmd.replace(format!("{{{{{key}}}}}").as_str(), value);
+    }
+    cmd
+}
+
 fn get_collection_and_target(
     collection: &CollectionConfig,
     arg: &str,
@@ -28,23 +36,13 @@ fn get_collection_and_target(
     if path.is_empty() {
         panic!("invalid arg");
     } else if path.len() == 1 {
-        
-        
-            "{:?}",
-            collection
-                .targets
-                .iter()
-                .map(|x| x.id.to_string())
-                .collect::<Vec<String>>()
-                .join(", ")
-        );
         let target_config = collection
             .targets
             .iter()
             .find(|x| x.id == *path.first().unwrap())
             .cloned()
             .unwrap();
-        
+
         (collection.clone(), target_config)
     } else {
         let this_collection_id = path.first().unwrap();
@@ -58,17 +56,9 @@ fn get_collection_and_target(
             .iter()
             .find(|x| x.id == *this_collection_id)
             .unwrap();
-        
+
         get_collection_and_target(child, &path.as_slice()[1..].join("/"))
     }
-}
-
-fn replace_consts(string: &str, consts: &HashMap<String, String>) -> String {
-    let mut cmd = string.to_string();
-    for (key, value) in consts {
-        cmd = cmd.replace(format!("{{{{{key}}}}}").as_str(), value);
-    }
-    cmd
 }
 
 fn create_all_options(collection: &CollectionConfig, path: &str) -> Vec<String> {
@@ -103,13 +93,8 @@ fn main() {
             let ans = loop {
                 let options = create_all_options(&found_config, "");
                 let ans = Select::new("Select", options).prompt().unwrap();
-                
-                if ans.ends_with("/") {
-                    // println!(
-                    //     "looking for collection {ans}, in {:?}",
-                    //     found_config.collections.as_ref().unwrap()
-                    // );
 
+                if ans.ends_with("/") {
                     found_config = found_config
                         .collections
                         .unwrap()
@@ -128,7 +113,7 @@ fn main() {
     let consts = build_consts(&collection_config, &target_config);
 
     let list_cmd = replace_consts(&target_config.list_cmd, &consts);
-    
+
     let result = Command::new("sh")
         .arg("-c")
         .arg(&list_cmd)
@@ -138,8 +123,7 @@ fn main() {
     let list_text = String::from_utf8(result.stdout).unwrap();
     let input = create_selection_input(&target_config, &list_text);
 
-    show_options(input, consts); // if no target show selector
-    // if target, find target config and load the specified target in editor
+    show_options(input, consts);
 }
 
 #[derive(Debug)]
@@ -213,8 +197,6 @@ fn create_selection_input(target_config: &TargetConfig, list_text: &str) -> Sele
 }
 
 pub fn show_options(input: SelectionInput, mut consts: HashMap<String, String>) {
-    
-
     let ans: String = Select::new("Select Option", input.options.clone())
         .with_page_size(20)
         .prompt()
@@ -231,13 +213,11 @@ pub fn show_options(input: SelectionInput, mut consts: HashMap<String, String>) 
 
     let run_cmd = replace_consts(&input.run_cmd, &consts);
 
-    
-
     let mut command = Command::new("sh");
 
     if let Some(path) = input.cwd {
         let cwd = replace_consts(&path, &consts);
-        
+
         command.current_dir(cwd);
     }
 
