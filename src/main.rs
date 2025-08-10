@@ -1,6 +1,5 @@
-use config::{CollectionConfig, TargetConfig, get_config};
+use config::{CollectionConfig, SelectionInput, TargetConfig, get_config};
 use inquire::Select;
-use regex::Regex;
 use std::{collections::HashMap, env::args, process::Command};
 
 mod config;
@@ -25,7 +24,8 @@ fn replace_consts(string: &str, consts: &HashMap<String, String>) -> String {
     for (key, value) in consts {
         cmd = cmd.replace(format!("{{{{{key}}}}}").as_str(), value);
     }
-    cmd
+
+    shellexpand::full(&cmd).unwrap().to_string()
 }
 
 fn get_collection_and_target(
@@ -82,14 +82,16 @@ fn create_all_options(collection: &CollectionConfig, path: &str) -> Vec<String> 
 }
 
 fn main() {
-    let root_collection_config = get_config();
+    let config = get_config();
 
     let target_config_arg = args().nth(1);
 
+    let root_collection = config.root_collection;
+
     let (collection_config, target_config) = match target_config_arg {
-        Some(target_config) => get_collection_and_target(&root_collection_config, &target_config),
+        Some(target_config) => get_collection_and_target(&root_collection, &target_config),
         None => {
-            let mut found_config = root_collection_config.clone();
+            let mut found_config = root_collection.clone();
             let ans = loop {
                 let options = create_all_options(&found_config, "");
                 let ans = Select::new("Select", options).prompt().unwrap();
@@ -110,112 +112,34 @@ fn main() {
         }
     };
 
-    let consts = build_consts(&collection_config, &target_config);
+    let mut consts = build_consts(&collection_config, &target_config);
 
-    let list_cmd = replace_consts(&target_config.list_cmd, &consts);
-
-    let result = Command::new("sh")
-        .arg("-c")
-        .arg(&list_cmd)
-        .output()
-        .expect("failed to get list output");
-
-    let list_text = String::from_utf8(result.stdout).unwrap();
-    let input = create_selection_input(&target_config, &list_text);
-
-    show_options(input, consts);
-}
-
-#[derive(Debug)]
-pub struct SelectionInput {
-    pub options: Vec<String>,
-    pub args: Vec<String>,
-    pub run_cmd: String,
-    pub cwd: Option<String>,
-}
-
-fn create_selection_input(target_config: &TargetConfig, list_text: &str) -> SelectionInput {
-    // Regex parsing
-    let name_regex = target_config
-        .select_option_regex
-        .clone()
-        .unwrap_or("(.*)".to_string());
-    let name_regex = Regex::new(&name_regex).unwrap();
-
-    let arg_regex = target_config
-        .select_arg_regex
-        .clone()
-        .unwrap_or("(.*)".to_string());
-    let arg_regex = Regex::new(&arg_regex).unwrap();
-
-    // Build options and args from list command
-    let input: (Vec<String>, Vec<String>) = list_text
-        .lines()
-        .map(|x| {
-            let name: String = name_regex
-                .captures_iter(x)
-                .map(|x| x.get(1).unwrap().as_str().to_string())
-                .collect();
-
-            let arg: Vec<String> = arg_regex
-                .captures_iter(x)
-                .map(|x| x.get(1).unwrap().as_str().to_string())
-                .collect();
-
-            match arg {
-                _ if arg.is_empty() => {
-                    panic!("unable to extract arg from {x}");
-                }
-                _ if arg.len() > 1 => {
-                    panic!(
-                        "unable to handle multiple args per option (found {}): {:?}",
-                        arg.len(),
-                        arg
-                    );
-                }
-                _ => (name, arg.first().unwrap().to_string()),
-            }
-        })
-        .fold(HashMap::new(), |mut acc, (name, arg)| {
-            acc.insert(name, arg);
-            acc
-        })
+    let used_function = config
+        .functions
         .iter()
-        .fold((vec![], vec![]), |(names, args), (name, arg)| {
-            (
-                [names, vec![name.to_string()]].concat(),
-                [args, vec![arg.to_string()]].concat(),
-            )
-        });
-
-    SelectionInput {
-        options: input.0,
-        args: input.1,
-        run_cmd: target_config.run_cmd.to_string(),
-        cwd: target_config.cwd.clone(),
-    }
-}
-
-pub fn show_options(input: SelectionInput, mut consts: HashMap<String, String>) {
-    let ans: String = Select::new("Select Option", input.options.clone())
-        .with_page_size(20)
-        .prompt()
+        .find(|x| x.id == target_config.function_id)
         .unwrap();
 
-    let selected_arg = input
-        .args
+    let args_with_consts: Vec<_> = target_config
+        .function_args
         .iter()
-        .zip(input.options)
-        .find(|(_, name)| *name == ans);
-    let (arg, _) = selected_arg.unwrap();
+        .map(|x| replace_consts(x, &consts))
+        .collect();
+
+    let input = used_function.execute(&args_with_consts);
+
+    let arg = get_selected_option(&input);
+    println!("arg: {arg}");
 
     consts.insert("arg".to_string(), arg.to_string());
 
-    let run_cmd = replace_consts(&input.run_cmd, &consts);
+    println!("{}", target_config.run_cmd);
+    let run_cmd = replace_consts(&target_config.run_cmd, &consts);
 
+    println!("RUNCMD: {run_cmd}");
     let mut command = Command::new("sh");
 
-    if let Some(path) = input.cwd {
+    if let Some(path) = target_config.cwd {
         let cwd = replace_consts(&path, &consts);
 
         command.current_dir(cwd);
@@ -227,4 +151,20 @@ pub fn show_options(input: SelectionInput, mut consts: HashMap<String, String>) 
         Ok(status) => eprintln!("Command exited with non-zero code: {status}"),
         Err(err) => eprintln!("Failed to run command: {err}"),
     }
+}
+
+pub fn get_selected_option(input: &SelectionInput) -> String {
+    let ans: String = Select::new("Select Option", input.options.clone())
+        .with_page_size(20)
+        .prompt()
+        .unwrap();
+
+    let selected_arg = input
+        .args
+        .iter()
+        .zip::<&[String]>(&input.options)
+        .find(|(_, name)| name == &&ans);
+    let (arg, _) = selected_arg.unwrap();
+
+    arg.to_string()
 }
