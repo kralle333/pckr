@@ -120,11 +120,12 @@ fn main() {
         .find(|x| x.id == target_config.function_id)
         .unwrap();
 
-    let args_with_consts: Vec<_> = target_config
-        .function_args
-        .iter()
-        .map(|x| replace_consts(x, &consts))
-        .collect();
+    let args_with_consts = match target_config.function_args.as_ref() {
+        Some(args) => args.iter().map(|x| replace_consts(x, &consts)).collect(),
+        None => {
+            vec![]
+        }
+    };
 
     let input = used_function.execute(&args_with_consts);
 

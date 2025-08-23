@@ -12,14 +12,14 @@ fn initial_functions() -> Vec<Function> {
     let files = Function {
         id: "find.files".to_string(),
         list_cmd: r#"fd --type f . {{arg.0}} | grep -E '{{arg.1}}' | sort -u"#.to_string(),
-        arg_descriptions: vec!["Root dir".to_string(), "File regex".to_string()],
+        arg_descriptions: Some(vec!["Root dir".to_string(), "File regex".to_string()]),
         select_option_regex: None,
         select_arg_regex: None,
     };
 
     let dirs = Function {
         id: "list.folders".to_string(),
-        arg_descriptions: vec!["Root dir".to_string(), "File regex".to_string()],
+        arg_descriptions: Some(vec!["Root dir".to_string(), "File regex".to_string()]),
         list_cmd: r#"fd --type f . {{arg.0}} | grep -E '{{arg.1}}' | awk -F/ 'NF{NF--; print "/"$0}' OFS=/ | sort -u"#.to_string(),
         select_option_regex: Some("([^/]+)$".to_string()),
         select_arg_regex: None,
@@ -31,7 +31,7 @@ fn initial_functions() -> Vec<Function> {
 #[derive(Deserialize, Serialize, Debug, Default, Clone)]
 pub struct Function {
     pub id: String,
-    pub arg_descriptions: Vec<String>,
+    pub arg_descriptions: Option<Vec<String>>,
     pub list_cmd: String,
     pub select_option_regex: Option<String>,
     pub select_arg_regex: Option<String>,
@@ -139,7 +139,7 @@ pub struct TargetConfig {
     pub name: Option<String>,
     pub id: String,
     pub function_id: String,
-    pub function_args: Vec<String>,
+    pub function_args: Option<Vec<String>>,
     pub run_cmd: String,
     pub cwd: Option<String>,
     pub consts: Option<HashMap<String, String>>,
@@ -229,7 +229,7 @@ pub fn get_config() -> Config {
                     run_cmd: "$EDITOR {{arg}}".to_string(),
                     cwd: None,
                     consts: None,
-                    function_args: vec!["~/".to_string(), ".log$".to_string()],
+                    function_args: Some(vec!["~/".to_string(), ".log$".to_string()]),
                 }],
                 functions: vec![],
             };
