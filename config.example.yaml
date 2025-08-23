@@ -1,0 +1,37 @@
+functions:
+- id: find.files
+  arg_descriptions:
+    - Root dir
+    - File regex
+  list_cmd: fd --type f . {{arg.0}} | grep -E '{{arg.1}}' | sort -u
+  select_option_regex: null
+  select_arg_regex: null
+- id: list.folders
+  arg_descriptions:
+    - Root dir
+    - File regex
+  list_cmd: fd --type f . {{arg.0}} | grep -E '{{arg.1}}' | awk -F/ 'NF{NF--; print "/"$0}' OFS=/ | sort -u
+  select_option_regex: ([^/]+)$
+  select_arg_regex: null
+- id: list_zellij
+  list_cmd: zellij list-sessions -ns
+consts: {}
+root_collection:
+  id: root
+  consts: {}
+  functions: []
+  targets:
+  - name: Open log file
+    id: open.log.file
+    function_id: find.files
+    function_args:
+    - ~/.config/
+    - .log$
+    run_cmd: bat {{arg}}
+    cwd: null
+    consts: null
+  - name: Attach zellij session
+    id: zellij.attach
+    function_id: list_zellij
+    run_cmd:  "zellij attach \"{{arg}}\""
+  collections: null
