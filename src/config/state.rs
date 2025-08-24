@@ -1,0 +1,103 @@
+use anyhow::anyhow;
+use std::{collections::HashMap, fs, path::PathBuf, process::exit};
+
+use crate::config::structs::{CollectionConfig, Config, Function, ListerChoice, TargetConfig};
+
+fn initial_functions() -> Vec<Function> {
+    let files = Function {
+        id: "find.files".to_string(),
+        list_cmd: r#"fd --type f . {{arg.0}} | grep -E '{{arg.1}}' | sort -u"#.to_string(),
+        arg_descriptions: Some(vec!["Root dir".to_string(), "File regex".to_string()]),
+        select_option_regex: None,
+        select_arg_regex: None,
+    };
+
+    let dirs = Function {
+        id: "list.folders".to_string(),
+        arg_descriptions: Some(vec!["Root dir".to_string(), "File regex".to_string()]),
+        list_cmd: r#"fd --type f . {{arg.0}} | grep -E '{{arg.1}}' | awk -F/ 'NF{NF--; print "/"$0}' OFS=/ | sort -u"#.to_string(),
+        select_option_regex: Some("([^/]+)$".to_string()),
+        select_arg_regex: None,
+    };
+
+    vec![files, dirs]
+}
+
+fn get_path() -> Result<PathBuf, anyhow::Error> {
+    Ok(dirs::config_dir()
+        .ok_or(anyhow!("failed to find config dig"))?
+        .join("pckr")
+        .join("config.yaml"))
+}
+
+fn save_config(config: &Config) -> Result<(), anyhow::Error> {
+    let config_path = get_path()?;
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+    fs::write(config_path, serde_yaml::to_string(&config)?)?;
+
+    Ok(())
+}
+
+pub fn load_config() -> Result<Option<Config>, anyhow::Error> {
+    let config_path = get_path()?;
+
+    if let Ok(false) = fs::exists(&config_path) {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&config_path)?;
+
+    let config = match serde_yaml::from_str(&content) {
+        Ok(config) => config,
+        Err(e) => {
+            return Err(anyhow!("Failed to deserialize config {}", e));
+        }
+    };
+    Ok(config)
+}
+
+pub fn get_config() -> Config {
+    match load_config() {
+        Ok(Some(config)) => config,
+        Ok(None) => {
+            match inquire::Confirm::new("Failed to find config file, create default config file?")
+                .with_default(false)
+                .prompt()
+            {
+                Ok(true) => {}
+                Ok(false) => exit(0),
+                Err(_) => {}
+            };
+
+            let root_collection = CollectionConfig {
+                collections: None,
+                id: "root".to_string(),
+                consts: Some(HashMap::new()),
+                targets: vec![TargetConfig {
+                    name: Some("Open log file".to_string()),
+                    id: "open.log.file".to_string(),
+                    lister: ListerChoice::Function {
+                        id: "find.files".to_string(),
+                        args: Some(vec!["~/".to_string(), ".log$".to_string()]),
+                    },
+                    run_cmd: "$EDITOR {{arg}}".to_string(),
+                    cwd: None,
+                    consts: None,
+                }],
+            };
+
+            let new_config = Config {
+                functions: initial_functions(),
+                consts: Some(HashMap::new()),
+                root_collection,
+            };
+
+            save_config(&new_config).unwrap();
+            new_config
+        }
+        Err(e) => {
+            println!("Failed to parse pckr config with error: {e}");
+            exit(1);
+        }
+    }
+}
