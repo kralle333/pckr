@@ -40,6 +40,9 @@ pub enum ListerChoice {
         options: Vec<String>,
         args: Vec<String>,
     },
+    Cmd {
+        list_cmd: String,
+    },
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

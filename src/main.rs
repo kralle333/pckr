@@ -5,7 +5,7 @@ use crate::{
     navigation::{create_all_options, get_collection_and_target},
     runner::run_target_command,
 };
-use std::env::args;
+use std::{env::args, process::Command};
 
 use crate::{
     config::{state::get_config, structs::ListerChoice},
@@ -64,13 +64,31 @@ fn main() {
             };
             create_function_input(used_function, &args_with_consts)
         }
-
         ListerChoice::List { options, args } => SelectionInput { options, args },
+        ListerChoice::Cmd { list_cmd } => {
+            let command = replace_consts(&list_cmd, &consts);
+            let result = Command::new("sh")
+                .arg("-c")
+                .arg(&command)
+                .output()
+                .expect("failed to get list output");
+
+            let list_text: Vec<_> = String::from_utf8(result.stdout)
+                .unwrap()
+                .lines()
+                .map(|x| x.to_string())
+                .collect();
+            SelectionInput {
+                options: list_text.clone(),
+                args: list_text.clone(),
+            }
+        }
     };
 
     let arg = get_selected_option(&input);
     consts.insert("arg".to_string(), arg.to_string());
 
+    println!("Args are {arg}");
     let run_cmd = replace_consts(&target_config.run_cmd, &consts);
     let cwd = target_config.cwd.map(|x| replace_consts(&x, &consts));
 
