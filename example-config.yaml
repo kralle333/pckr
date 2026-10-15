@@ -1,27 +1,77 @@
-globals:
+# Consts are available as {{name}} everywhere. Collections and targets can
+# add or override consts, the closest one wins.
+consts:
   editor: hx
-  projects_root: /Users/hellothere/projects
+  projects_root: ~/projects
 
-targets:
-  - name: Personal Rust projects
-    id: personal.rust.projects
-    select_option_regex: "([^/]+)$"
+functions:
+  - id: list.folders.containing
+    arg_descriptions:
+      - Root dir
+      - File regex
     list_cmd: >
-      fd --type f . {{globals.projects_root}}/personal |
-      grep -E '/[^/]*Cargo.toml[^/]*$' |
+      fd --type f . {{arg.0}} |
+      grep -E '{{arg.1}}' |
       awk -F/ 'NF{NF--; print "/"$0}' OFS=/ |
       sort -u
-    run_cmd: "{{globals.editor}} {{arg}}"
-  - name: Zellij Sessions
-    id: zellij.sessions
-    list_cmd: zellij list-sessions -ns
-    run_cmd: "zellij attach \"{{arg}}\""
-    
-  - name: Docker logs
-    id: docker.logs
-    select_option_regex: "(.+) "
-    select_arg_regex: " (.+)"
-    list_cmd: docker ps -a --format "{{.Names}} {{.ID}}"
-    run_cmd: "docker logs {{arg}}"
-      
+    select_option_regex: "([^/]+)$"
 
+root_collection:
+  id: root
+  targets:
+    - name: Zellij Sessions
+      id: zellij.sessions
+      lister:
+        type: cmd
+        list_cmd: zellij list-sessions -ns
+      # {{arg}} is shell quoted, use {{arg.raw}} to insert it as is
+      run_cmd: zellij attach {{arg}}
+
+    - name: Docker logs
+      id: docker.logs
+      lister:
+        type: cmd
+        list_cmd: docker ps -a --format "{{.Names}} {{.ID}}"
+        select_option_regex: "(.+) "
+        select_arg_regex: " (.+)"
+      run_cmd: docker logs {{arg}}
+
+  collections:
+    # Run with `pckr projects/rust` or navigate to it interactively
+    - id: projects
+      targets:
+        - name: Personal Rust projects
+          id: rust
+          lister:
+            type: function
+            id: list.folders.containing
+            args:
+              - "{{projects_root}}/personal"
+              - /Cargo.toml$
+          run_cmd: "{{editor}} ."
+          cwd: "{{arg}}"
+
+    - id: git
+      consts:
+        editor: vim
+      targets:
+        - name: Git maintenance
+          id: maintenance
+          lister:
+            type: list
+            options:
+              - Prune merged branches
+              - Garbage collect
+            args:
+              - git branch --merged | grep -v '^\*' | xargs git branch -d
+              - git gc
+          run_cmd: "{{arg.raw}}"
+
+        - name: Edit git config
+          id: config
+          lister:
+            type: list
+            options:
+              - ~/.gitconfig
+              - .git/config
+          run_cmd: "{{editor}} {{arg.raw}}"

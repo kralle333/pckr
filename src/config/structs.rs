@@ -38,10 +38,12 @@ pub enum ListerChoice {
     },
     List {
         options: Vec<String>,
-        args: Vec<String>,
+        args: Option<Vec<String>>,
     },
     Cmd {
         list_cmd: String,
+        select_option_regex: Option<String>,
+        select_arg_regex: Option<String>,
     },
 }
 

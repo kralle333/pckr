@@ -1,54 +1,82 @@
+use anyhow::{Result, anyhow};
+use inquire::Select;
+
 use crate::config::structs::{CollectionConfig, TargetConfig};
 
-pub fn get_collection_and_target(
-    collection: &CollectionConfig,
+/// Resolves a path like `collection/sub_collection/target` and returns the
+/// collections walked through (root first) together with the target.
+pub fn get_collection_and_target<'a>(
+    root: &'a CollectionConfig,
     arg: &str,
-) -> (CollectionConfig, TargetConfig) {
-    let path: Vec<String> = arg.split("/").map(|x| x.to_string()).collect();
-    if path.is_empty() {
-        panic!("invalid arg");
-    } else if path.len() == 1 {
-        let target_config = collection
-            .targets
-            .iter()
-            .find(|x| x.id == *path.first().unwrap())
-            .cloned()
-            .unwrap();
+) -> Result<(Vec<&'a CollectionConfig>, &'a TargetConfig)> {
+    let mut segments: Vec<&str> = arg.split('/').collect();
+    let target_id = segments
+        .pop()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| anyhow!("invalid target path '{arg}'"))?;
 
-        (collection.clone(), target_config)
-    } else {
-        let this_collection_id = path.first().unwrap();
-        if collection.collections.is_none() {
-            panic!("expected collection with id {this_collection_id}, but found none!");
-        }
-        let child = collection
+    let mut chain = vec![root];
+    for collection_id in segments {
+        let current = *chain.last().unwrap();
+        let child = current
             .collections
-            .as_ref()
-            .unwrap()
             .iter()
-            .find(|x| x.id == *this_collection_id)
-            .unwrap();
+            .flatten()
+            .find(|x| x.id == collection_id)
+            .ok_or_else(|| {
+                anyhow!(
+                    "no collection with id '{collection_id}' in '{}'",
+                    current.id
+                )
+            })?;
+        chain.push(child);
+    }
 
-        get_collection_and_target(child, &path.as_slice()[1..].join("/"))
+    let collection = *chain.last().unwrap();
+    let target_config = find_target(collection, target_id)?;
+    Ok((chain, target_config))
+}
+
+/// Lets the user navigate the collection tree and pick a target.
+pub fn select_target(
+    root: &CollectionConfig,
+) -> Result<(Vec<&CollectionConfig>, &TargetConfig)> {
+    let mut chain = vec![root];
+    loop {
+        let collection = *chain.last().unwrap();
+        let ans = Select::new("Select", create_all_options(collection)).prompt()?;
+
+        match ans.strip_suffix('/') {
+            Some(collection_id) => {
+                let child = collection
+                    .collections
+                    .iter()
+                    .flatten()
+                    .find(|x| x.id == collection_id)
+                    .ok_or_else(|| anyhow!("no collection with id '{collection_id}'"))?;
+                chain.push(child);
+            }
+            None => {
+                let target_config = find_target(collection, &ans)?;
+                return Ok((chain, target_config));
+            }
+        }
     }
 }
 
-pub fn create_all_options(collection: &CollectionConfig, path: &str) -> Vec<String> {
-    let prepend = if path.is_empty() {
-        "".to_string()
-    } else {
-        format!("{path}/")
-    };
-    let mut target_paths: Vec<_> = collection
+fn find_target<'a>(collection: &'a CollectionConfig, id: &str) -> Result<&'a TargetConfig> {
+    collection
         .targets
         .iter()
-        .map(|x| format!("{prepend}{}", x.id))
-        .collect();
+        .find(|x| x.id == id)
+        .ok_or_else(|| anyhow!("no target with id '{id}' in '{}'", collection.id))
+}
 
-    if let Some(collections) = &collection.collections {
-        for c in collections {
-            target_paths.push(format!("{}/", c.id));
-        }
+fn create_all_options(collection: &CollectionConfig) -> Vec<String> {
+    let mut target_paths: Vec<_> = collection.targets.iter().map(|x| x.id.clone()).collect();
+
+    for c in collection.collections.iter().flatten() {
+        target_paths.push(format!("{}/", c.id));
     }
     target_paths
 }

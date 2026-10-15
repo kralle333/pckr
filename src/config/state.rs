@@ -65,8 +65,7 @@ pub fn get_config() -> Config {
                 .prompt()
             {
                 Ok(true) => {}
-                Ok(false) => exit(0),
-                Err(_) => {}
+                Ok(false) | Err(_) => exit(0),
             };
 
             let root_collection = CollectionConfig {

@@ -1,16 +1,18 @@
-use inquire::Select;
+use anyhow::{Result, anyhow, bail};
+use inquire::InquireError;
 
 use crate::{
-    config::structs::{CollectionConfig, Config, TargetConfig},
-    navigation::{create_all_options, get_collection_and_target},
+    navigation::{get_collection_and_target, select_target},
     runner::run_target_command,
 };
-use std::{env::args, process::Command};
+use std::{env::args, process::exit};
 
 use crate::{
     config::{state::get_config, structs::ListerChoice},
-    consts::{build_consts, replace_consts},
-    selection_input::{SelectionInput, create_function_input, get_selected_option},
+    consts::{build_consts, replace_arg, replace_consts},
+    selection_input::{
+        SelectionInput, create_cmd_input, create_function_input, get_selected_option,
+    },
 };
 
 mod config;
@@ -19,78 +21,81 @@ mod navigation;
 mod runner;
 mod selection_input;
 
-fn parse_arg(config: &Config) -> (CollectionConfig, TargetConfig) {
-    let target_config_arg = args().nth(1);
-
-    match target_config_arg {
-        Some(target_config) => get_collection_and_target(&config.root_collection, &target_config),
-        None => {
-            let mut found_config = config.root_collection.clone();
-            let ans = loop {
-                let options = create_all_options(&found_config, "");
-                let ans = Select::new("Select", options).prompt().unwrap();
-
-                if ans.ends_with("/") {
-                    found_config = found_config
-                        .collections
-                        .unwrap()
-                        .iter()
-                        .find(|x| x.id == ans[0..ans.len() - 1])
-                        .unwrap()
-                        .clone();
-                } else {
-                    break ans;
-                }
-            };
-            get_collection_and_target(&found_config, &ans)
-        }
+fn main() {
+    match run() {
+        Ok(code) => exit(code),
+        Err(err) => match err.downcast_ref::<InquireError>() {
+            Some(InquireError::OperationCanceled) => exit(0),
+            Some(InquireError::OperationInterrupted) => exit(130),
+            _ => {
+                eprintln!("Error: {err:#}");
+                exit(1);
+            }
+        },
     }
 }
 
-fn main() {
+fn run() -> Result<i32> {
     let config = get_config();
-    let (collection_config, target_config) = parse_arg(&config);
-
-    let mut consts = build_consts(&collection_config, &target_config);
-    let input = match target_config.lister {
-        ListerChoice::Function { id, args } => {
-            let used_function = config.functions.iter().find(|x| x.id == id).unwrap();
-
-            let args_with_consts = match args.as_ref() {
-                Some(args) => args.iter().map(|x| replace_consts(x, &consts)).collect(),
-                None => {
-                    vec![]
-                }
-            };
-            create_function_input(used_function, &args_with_consts)
-        }
-        ListerChoice::List { options, args } => SelectionInput { options, args },
-        ListerChoice::Cmd { list_cmd } => {
-            let command = replace_consts(&list_cmd, &consts);
-            let result = Command::new("sh")
-                .arg("-c")
-                .arg(&command)
-                .output()
-                .expect("failed to get list output");
-
-            let list_text: Vec<_> = String::from_utf8(result.stdout)
-                .unwrap()
-                .lines()
-                .map(|x| x.to_string())
-                .collect();
-            SelectionInput {
-                options: list_text.clone(),
-                args: list_text.clone(),
-            }
-        }
+    let (collections, target_config) = match args().nth(1) {
+        Some(path) => get_collection_and_target(&config.root_collection, &path)?,
+        None => select_target(&config.root_collection)?,
     };
 
-    let arg = get_selected_option(&input);
-    consts.insert("arg".to_string(), arg.to_string());
+    let consts = build_consts(&config, &collections, target_config);
+    let input = match &target_config.lister {
+        ListerChoice::Function { id, args } => {
+            let used_function = config
+                .functions
+                .iter()
+                .find(|x| x.id == *id)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "target '{}' uses unknown function '{id}'",
+                        target_config.id
+                    )
+                })?;
 
-    println!("Args are {arg}");
-    let run_cmd = replace_consts(&target_config.run_cmd, &consts);
-    let cwd = target_config.cwd.map(|x| replace_consts(&x, &consts));
+            let args_with_consts: Vec<String> = args
+                .iter()
+                .flatten()
+                .map(|x| replace_consts(x, &consts))
+                .collect();
+            create_function_input(used_function, &args_with_consts, &consts)?
+        }
+        ListerChoice::List { options, args } => {
+            let args = args.clone().unwrap_or_else(|| options.clone());
+            if args.len() != options.len() {
+                bail!(
+                    "target '{}' has {} options but {} args",
+                    target_config.id,
+                    options.len(),
+                    args.len()
+                );
+            }
+            SelectionInput {
+                options: options.clone(),
+                args,
+            }
+        }
+        ListerChoice::Cmd {
+            list_cmd,
+            select_option_regex,
+            select_arg_regex,
+        } => create_cmd_input(
+            &replace_consts(list_cmd, &consts),
+            select_option_regex.as_deref(),
+            select_arg_regex.as_deref(),
+        )?,
+    };
 
-    run_target_command(&run_cmd, cwd);
+    let arg = get_selected_option(&input)?;
+
+    let run_cmd = replace_arg(&replace_consts(&target_config.run_cmd, &consts), &arg, true);
+    let cwd = target_config
+        .cwd
+        .as_ref()
+        .map(|x| replace_arg(&replace_consts(x, &consts), &arg, false));
+
+    run_target_command(&run_cmd, cwd.as_deref())
 }
